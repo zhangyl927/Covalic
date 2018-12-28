@@ -18,9 +18,7 @@
 ###############################################################################
 
 import cherrypy
-import math
 import os
-import posixpath
 
 from ..models.phase import Phase
 from ..models.submission import Submission
@@ -30,7 +28,6 @@ from girder.api.rest import Resource, filtermodel, loadmodel
 from girder.constants import AccessType, SortDir
 from girder.exceptions import AccessException, GirderException, RestException, ValidationException
 from girder.models.folder import Folder
-from girder.utility import mail_utils
 
 
 class Submission(Resource):
@@ -39,43 +36,8 @@ class Submission(Resource):
 
         self.resourceName = 'covalic_submission'
 
-        self.route('GET', (), self.listSubmissions)
-        self.route('GET', ('approaches',), self.listUserApproaches)
-        self.route('GET', (':id',), self.getSubmission)
-        self.route('GET', ('unscored',), self.getUnscoredSubmissions)
         self.route('POST', (), self.postSubmission)
-        self.route('PUT', (':id',), self.updateSubmission)
         self.route('POST', (':id', 'score'), self.postScore)
-        self.route('POST', (':id', 'rescore'), self.rescoreSubmission)
-        self.route('DELETE', (':id',), self.deleteSubmission)
-
-    def _filterScore(self, phase, submission, user):
-        """
-        If the phase is configured to hide scores from participants, removes
-        the relevant score fields from the document. Users with WRITE access
-        or above on the phase will still be able to view the scores.
-
-        Additionally, ensures that any NaN or Infinity score values are coerced
-        to corresponding strings so they can be JSON encoded.
-        """
-        if (phase.get('hideScores') and
-                not self.model('phase', 'covalic').hasAccess(
-                    phase, user, level=AccessType.WRITE)):
-            submission.pop('score', None)
-            submission.pop('overallScore', None)
-        else:
-            # coerce any nans or infs to strings
-            for dataset in (submission.get('score') or ()):
-                for metric in dataset['metrics']:
-                    if metric['value'] is not None:
-                        v = float(metric['value'])
-                        if math.isnan(v) or math.isinf(v):
-                            metric['value'] = str(v)
-            v = submission.get('overallScore') or 0
-            if math.isnan(v) or math.isinf(v):
-                submission['overallScore'] = str(v)
-
-        return submission
 
     def _checkRequireParam(self, phase, params, paramName, requireOptionName):
         """
@@ -102,60 +64,6 @@ class Submission(Resource):
             param = param.strip()
         return param
 
-    @access.public
-    @filtermodel(model='submission', plugin='covalic')
-    @autoDescribeRoute(
-        Description('List submissions to a challenge phase.')
-        .modelParam('phaseId', 'The ID of the phase.', model='phase', plugin='covalic',
-                    paramType='query', level=AccessType.READ)
-        .modelParam('userId', 'Show only results for the given user.', model='user',
-                    paramType='query', level=AccessType.READ, required=False, destName='userFilter')
-        .param('latest', 'Only include the latest scored submission for each user.',
-               required=False, dataType='boolean', default=True)
-        .param('approach', 'Only include this approach in the results',
-               required=False)
-        .pagingParams(defaultSort='overallScore', defaultSortDir=SortDir.DESCENDING)
-    )
-    def listSubmissions(self, phase, userFilter, latest, limit, offset, sort, approach):
-        user = self.getCurrentUser()
-
-        # If scores are hidden, do not allow sorting by score fields
-        if (phase.get('hideScores') and
-                not self.model('phase', 'covalic').hasAccess(
-                    phase, user, AccessType.WRITE)):
-            for field, _ in sort:
-                if field == 'overallScore' or field.startswith('score.'):
-                    raise AccessException(
-                        'Scores are hidden from participants in this phase, '
-                        'you may not sort by score fields.')
-
-        # Exclude score field
-        fields = {'score': False}
-
-        submissions = self.model('submission', 'covalic').list(
-            phase, limit=limit, offset=offset, sort=sort, userFilter=userFilter,
-            fields=fields, latest=latest, approach=approach)
-        return [self._filterScore(phase, s, user) for s in submissions]
-
-    @access.public
-    @autoDescribeRoute(
-        Description('List existing approaches for the current user.')
-        .modelParam('phaseId', 'Show only approaches used in this phase',
-                    model='phase', plugin='covalic', paramType='query',
-                    level=AccessType.READ, required=False, destName='phase')
-        .modelParam('userId', 'Show approaches used by this user (default: current user)',
-                    model='user', paramType='query', level=AccessType.READ,
-                    destName='user', required=False)
-    )
-    def listUserApproaches(self, phase, user):
-        currentUser = self.getCurrentUser()
-        if user is None:
-            user = currentUser
-
-        if user['_id'] != currentUser['_id']:
-            self.requireAdmin(currentUser, 'Only admins can see other user\'s approaches.')
-
-        return self.model('submission', 'covalic').listApproaches(phase=phase, user=user)
 
     @access.public
     @filtermodel(model=Submission)
@@ -250,71 +158,7 @@ class Submission(Resource):
             submissionModel.remove(submission)
             raise
 
-        return self._filterScore(phase, submission, user)
-
-    @access.public
-    @filtermodel(model=Submission)
-    @autoDescribeRoute(
-        Description('Overwrite the properties of a submission.')
-        .modelParam('id', 'The ID of the challenge phase to submit to.',
-                    model=Submission, paramType='path', destName='submission')
-        .param('title', 'Title for the submission', required=False)
-        .param('date', 'The date of the submission.', required=False)
-        .param('organization', 'Organization associated with the submission.',
-               required=False)
-        .param('organizationUrl', 'URL for organization associated with the submission.',
-               required=False)
-        .param('documentationUrl', 'URL of documentation associated with the submission.',
-               required=False)
-        .param('disqualified', 'Whether the submission is disqualified. Disqualified '
-               'submissions do not appear in the leaderboard.', dataType='boolean', required=False)
-        .param('approach', 'The submission approach.', required=False)
-        .jsonParam('meta', 'A JSON object containing additional submission metadata. '
-                   'If present, replaces the existing metadata.',
-                   paramType='form', requireObject=True, required=False)
-        .errorResponse('ID was invalid.')
-        .errorResponse('Write access to phase is required.', 403)
-    )
-    def updateSubmission(self, submission, **params):
-        # Ensure write access on the containing challenge phase
-        user = self.getCurrentUser()
-        phase = self.model('phase', 'covalic').load(
-            submission['phaseId'], user=user, exc=True, level=AccessType.WRITE)
-
-        title = self._getStrippedParam(params, 'title')
-        if title is not None:
-            submission['title'] = title
-        created = self._getStrippedParam(params, 'date')
-        if created is not None:
-            submission['created'] = created
-        # Since only admins may use this endpoint, skip the normal checks for
-        # 'enableOrganization', etc.
-        organization = self._getStrippedParam(params, 'organization')
-        if organization is not None:
-            submission['organization'] = organization
-        organizationUrl = self._getStrippedParam(params, 'organizationUrl')
-        if organizationUrl is not None:
-            submission['organizationUrl'] = organizationUrl
-        documentationUrl = self._getStrippedParam(params, 'documentationUrl')
-        if documentationUrl is not None:
-            submission['documentationUrl'] = documentationUrl
-        approach = self._getStrippedParam(params, 'approach')
-        if approach is not None:
-            submission['approach'] = approach
-        meta = params.get('meta')
-        if meta is not None:
-            submission['meta'] = meta
-
-        # Note that this does not enforce the requirement that only a single submission
-        # per user per phase is marked as the 'latest' submission. If access to this endpoint
-        # is expanded beyond admin users, then that requirement should be enforced.
-        disqualified = params['disqualified']
-        if disqualified is not None:
-            submission['latest'] = not disqualified
-
-        submission = self.model('submission', 'covalic').save(submission)
-
-        return self._filterScore(phase, submission, user)
+        return submission
 
     @access.public
     @autoDescribeRoute(
@@ -356,13 +200,6 @@ class Submission(Resource):
         .errorResponse('Admin access was denied for the challenge phase.', 403)
     )
     def postScore(self, submission, score, params):
-        # Ensure admin access on the containing challenge phase
-        phase = self.model('phase', 'covalic').load(
-            submission['phaseId'], user=self.getCurrentUser(), exc=True,
-            level=AccessType.ADMIN)
-
-        # Record whether submission is being re-scored
-        rescoring = 'overallScore' in submission
 
         # Save document to trigger computing overall score
         submission.pop('overallScore', None)
@@ -373,107 +210,5 @@ class Submission(Resource):
         token = self.getCurrentToken()
         self.model('token').remove(token)
 
-        user = self.model('user').load(submission['creatorId'], force=True)
-        challenge = self.model('challenge', 'covalic').load(
-            phase['challengeId'], force=True)
-        covalicHost = posixpath.dirname(mail_utils.getEmailUrlPrefix())
+        return submission
 
-        # Mail user
-        if not rescoring:
-            html = mail_utils.renderTemplate(
-                'covalic.submissionCompleteUser.mako',
-                {
-                    'phase': phase,
-                    'challenge': challenge,
-                    'submission': submission,
-                    'host': covalicHost
-                })
-            mail_utils.sendEmail(
-                to=user['email'], subject='Your submission has been scored',
-                text=html)
-
-
-        return self._filterScore(phase, submission, user)
-
-    @access.public
-    @loadmodel(model='submission', plugin='covalic')
-    @filtermodel(model='submission', plugin='covalic')
-    @describeRoute(
-        Description('Retrieve a single submission.')
-        .param('id', 'The ID of the submission.', paramType='path')
-        .errorResponse('ID was invalid.')
-        .errorResponse('Read access was denied for the challenge phase.', 403)
-    )
-    def getSubmission(self, submission, params):
-        # Ensure read access on the containing challenge phase
-        user = self.getCurrentUser()
-        phase = self.model('phase', 'covalic').load(
-            submission['phaseId'], user=user, exc=True, level=AccessType.READ)
-
-        return self._filterScore(phase, submission, user)
-
-    @access.public
-    @loadmodel(model='phase', plugin='covalic', level=AccessType.ADMIN)
-    def getUnscoredSubmissions(self, params):
-        # TODO implement
-        pass
-    getUnscoredSubmissions.description = (
-        Description('List unscored submissions for a given phase.')
-        .param('phaseId', 'The ID of the phase.')
-        .param('limit', "Result set size limit (default=50).", required=False,
-               dataType='int')
-        .param('offset', "Offset into result set (default=0).", required=False,
-               dataType='int')
-        .param('sort', 'Field to sort the result list by (default=created)',
-               required=False)
-        .errorResponse('Phase ID was invalid.')
-        .errorResponse('Admin access was denied for the challenge phase.', 403))
-
-    @access.public
-    @filtermodel(model=Submission)
-    @autoDescribeRoute(
-        Description('Re-run scoring for a submission.')
-        .modelParam('id', 'The ID of the submission.', model=Submission, paramType='path',
-                    destName='submission')
-        .errorResponse('ID was invalid.')
-        .errorResponse('Site admin access is required.', 403)
-    )
-    def rescoreSubmission(self, submission):
-        phaseModel = self.model('phase', 'covalic')
-        submissionModel = self.model('submission', 'covalic')
-
-        user = self.getCurrentUser()
-
-        # Allow rescoring only the latest submission
-        if not submission.get('latest', False):
-            raise RestException('Only the latest submission may be re-scored.')
-
-        phase = phaseModel.load(submission['phaseId'], force=True)
-
-        # Get API URL like in postSubmission(), but remove this endpoint's parameters
-        apiUrl = '/'.join(cherrypy.url().split('/')[:-3])
-
-        submission = submissionModel.scoreSubmission(submission, apiUrl)
-
-        return self._filterScore(phase, submission, user)
-
-    @access.public
-    @loadmodel(model='submission', plugin='covalic')
-    @describeRoute(
-        Description('Remove a submission to a phase.')
-        .notes('You must be either the owner of the submission, or have write '
-               'access to the phase of the submission.')
-        .param('id', 'The ID of the submission.', paramType='path')
-    )
-    def deleteSubmission(self, submission, params):
-        user = self.getCurrentUser()
-        phase = self.model('phase', 'covalic').load(submission['phaseId'],
-                                                    force=True)
-        if (user['_id'] == submission['creatorId'] or
-                self.model('phase', 'covalic').hasAccess(
-                    phase, user, AccessType.WRITE)):
-            self.model('submission', 'covalic').remove(submission)
-        else:
-            raise AccessException(
-                'You may only remove submissions that you made, or those under '
-                'phases that you have permission to edit.')
