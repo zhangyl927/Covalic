@@ -1,5 +1,6 @@
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/xenial64"
+  config.vm.synced_folder "/home/ylzhang/repos/opt_covalic", "/opt"
   config.vm.provider "virtualbox" do |v|
     v.memory = 4096
     v.cpus = 2

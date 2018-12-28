@@ -22,7 +22,6 @@ import math
 import os
 import posixpath
 
-from ..utility.user_emails import getPhaseUserEmails
 from ..models.phase import Phase
 from ..models.submission import Submission
 from girder.api import access
@@ -138,7 +137,7 @@ class Submission(Resource):
             fields=fields, latest=latest, approach=approach)
         return [self._filterScore(phase, s, user) for s in submissions]
 
-    @access.user
+    @access.public
     @autoDescribeRoute(
         Description('List existing approaches for the current user.')
         .modelParam('phaseId', 'Show only approaches used in this phase',
@@ -158,7 +157,7 @@ class Submission(Resource):
 
         return self.model('submission', 'covalic').listApproaches(phase=phase, user=user)
 
-    @access.user
+    @access.public
     @filtermodel(model=Submission)
     @autoDescribeRoute(
         Description('Make a submission to the challenge.')
@@ -253,7 +252,7 @@ class Submission(Resource):
 
         return self._filterScore(phase, submission, user)
 
-    @access.user
+    @access.public
     @filtermodel(model=Submission)
     @autoDescribeRoute(
         Description('Overwrite the properties of a submission.')
@@ -317,7 +316,7 @@ class Submission(Resource):
 
         return self._filterScore(phase, submission, user)
 
-    @access.user
+    @access.public
     @autoDescribeRoute(
         Description('Post a score for a given submission.')
         .modelParam('id', model='submission', plugin='covalic')
@@ -393,20 +392,6 @@ class Submission(Resource):
                 to=user['email'], subject='Your submission has been scored',
                 text=html)
 
-        # Mail admins
-        emails = sorted(getPhaseUserEmails(
-            phase, AccessType.WRITE, includeChallengeUsers=True))
-        html = mail_utils.renderTemplate(
-            'covalic.submissionCompleteAdmin.mako',
-            {
-                'user': user,
-                'phase': phase,
-                'challenge': challenge,
-                'submission': submission,
-                'host': covalicHost
-            })
-        mail_utils.sendEmail(
-            to=emails, subject='A submission has been scored', text=html)
 
         return self._filterScore(phase, submission, user)
 
@@ -427,7 +412,7 @@ class Submission(Resource):
 
         return self._filterScore(phase, submission, user)
 
-    @access.user
+    @access.public
     @loadmodel(model='phase', plugin='covalic', level=AccessType.ADMIN)
     def getUnscoredSubmissions(self, params):
         # TODO implement
@@ -444,7 +429,7 @@ class Submission(Resource):
         .errorResponse('Phase ID was invalid.')
         .errorResponse('Admin access was denied for the challenge phase.', 403))
 
-    @access.admin
+    @access.public
     @filtermodel(model=Submission)
     @autoDescribeRoute(
         Description('Re-run scoring for a submission.')
@@ -472,7 +457,7 @@ class Submission(Resource):
 
         return self._filterScore(phase, submission, user)
 
-    @access.user
+    @access.public
     @loadmodel(model='submission', plugin='covalic')
     @describeRoute(
         Description('Remove a submission to a phase.')

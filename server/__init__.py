@@ -19,21 +19,21 @@
 
 import mako
 import os
-import posixpath
+
 
 from girder import events
 from girder.api.rest import getCurrentUser
 from girder.api.v1 import resource
 from girder.constants import AccessType, SettingKey, STATIC_ROOT_DIR
 from girder.models.model_base import ValidationException
-from girder.plugins.jobs.constants import JobStatus
-from girder.utility import mail_utils
+
+
 from girder.utility.model_importer import ModelImporter
 from girder.utility.plugin_utilities import registerPluginWebroot
 from .rest import challenge, phase, submission
 from .constants import PluginSettings, JOB_LOG_PREFIX
 from .utility import getAssetsFolder
-from .utility.user_emails import getPhaseUserEmails
+
 
 
 class CustomAppRoot(ModelImporter):
@@ -50,42 +50,8 @@ class CustomAppRoot(ModelImporter):
         'title': 'Covalic'
     }
 
-    template = r"""
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>${title}</title>
-        <link rel="stylesheet"
-              href="//fonts.googleapis.com/css?family=Droid+Sans:400,700">
-        <link rel="stylesheet"
-              href="${staticRoot}/built/fontello/css/fontello.css">
-        <link rel="stylesheet"
-              href="${staticRoot}/built/fontello/css/animation.css">
-        <link rel="stylesheet" href="${staticRoot}/built/girder_lib.min.css">
-        <link rel="stylesheet"
-              href="${staticRoot}/built/plugins/covalic/covalic.min.css">
-        % for plugin in pluginCss:
-            <link rel="stylesheet"
-                  href="${staticRoot}/built/plugins/${plugin}/plugin.min.css">
-        % endfor
-        <link rel="icon"
-              type="image/png"
-              href="${staticRoot}/img/Girder_Favicon.png">
 
-      </head>
-      <body>
-        <div id="g-global-info-apiroot" class="hide">${apiRoot}</div>
-        <div id="g-global-info-staticroot" class="hide">${staticRoot}</div>
-        <script src="${staticRoot}/built/girder_lib.min.js"></script>
-        <script src="${staticRoot}/built/girder_app.min.js"></script>
-        % for plugin in pluginJs:
-          <script src="${staticRoot}/built/plugins/${plugin}/plugin.min.js"></script>
-        % endfor
-        <script src="${staticRoot}/built/plugins/covalic/covalic.min.js"></script>
-      </body>
-    </html>
-    """
+
 
     def GET(self):
         if self.indexHtml is None:
@@ -141,73 +107,6 @@ def onPhaseSave(event):
     submissionModel.updateFolderAccess(phase, submissions)
 
 
-def onJobUpdate(event):
-    """
-    Hook into job update event so we can look for job failure events and email
-    the user and challenge/phase administrators accordingly. Here, an
-    administrator is defined to be a user with WRITE access or above.
-    """
-    isErrorStatus = False
-    try:
-        isErrorStatus = int(event.info['params'].get('status')) == JobStatus.ERROR
-    except (ValueError, TypeError):
-        pass
-
-    if (event.info['job']['type'] == 'covalic_score' and isErrorStatus):
-        covalicHost = posixpath.dirname(mail_utils.getEmailUrlPrefix())
-
-        # Create minimal log that contains only Covalic errors.
-        # Use full log if no Covalic-specific errors are found.
-        # Fetch log from model, because log in event may not be up-to-date.
-        job = ModelImporter.model('job', 'jobs').load(
-            event.info['job']['_id'], includeLog=True, force=True)
-        log = job.get('log')
-
-        minimalLog = None
-        if log:
-            log = ''.join(log)
-            minimalLog = '\n'.join([line[len(JOB_LOG_PREFIX):].strip()
-                                    for line in log.splitlines()
-                                    if line.startswith(JOB_LOG_PREFIX)])
-        if not minimalLog:
-            minimalLog = log
-
-        submission = ModelImporter.model('submission', 'covalic').load(
-            event.info['job']['covalicSubmissionId'])
-        phase = ModelImporter.model('phase', 'covalic').load(
-            submission['phaseId'], force=True)
-        challenge = ModelImporter.model('challenge', 'covalic').load(
-            phase['challengeId'], force=True)
-        user = ModelImporter.model('user').load(
-            event.info['job']['userId'], force=True)
-
-        rescoring = job.get('rescoring', False)
-
-        # Mail admins, include full log
-        emails = sorted(getPhaseUserEmails(
-            phase, AccessType.WRITE, includeChallengeUsers=True))
-        html = mail_utils.renderTemplate('covalic.submissionErrorAdmin.mako', {
-            'submission': submission,
-            'challenge': challenge,
-            'phase': phase,
-            'user': user,
-            'host': covalicHost,
-            'log': log
-        })
-        mail_utils.sendEmail(
-            to=emails, subject='Submission processing error', text=html)
-
-        # Mail user, include minimal log
-        if not rescoring:
-            html = mail_utils.renderTemplate('covalic.submissionErrorUser.mako', {
-                'submission': submission,
-                'challenge': challenge,
-                'phase': phase,
-                'host': covalicHost,
-                'log': minimalLog
-            })
-            mail_utils.sendEmail(
-                to=user['email'], subject='Submission processing error', text=html)
 
 
 def onUserSave(event):
@@ -238,7 +137,6 @@ def load(info):
 
     registerPluginWebroot(CustomAppRoot(), info['name'])
 
-    events.bind('jobs.job.update', 'covalic', onJobUpdate)
     events.bind('model.setting.validate', 'covalic', validateSettings)
     events.bind('model.challenge_challenge.save.after', 'covalic',
                 challengeSaved)

@@ -60,27 +60,27 @@ def getChallengeUserEmails(challenge, accessLevel):
     return emails
 
 
-def getPhaseUserEmails(phase, accessLevel, includeChallengeUsers=True):
-    """
-    Get a list of the email addresses for users with the given access level or
-    above on the given phase.
-
-    :param phase: the phase document
-    :type phase: dict
-    :param accessLevel: the minimum access level
-    :type accessLevel: girder.AccessType
-    :param includeChallengeUsers: if True, include the email addresses for
-        users with on the phase's challenge. Duplicates are removed.
-    :type includeChallengeUsers: bool
-    """
-    acl = ModelImporter.model('phase', 'covalic').getFullAccessList(phase)
-    users = _getUsers(acl, accessLevel)
-    emails = [user['email'] for user in users]
-
-    if includeChallengeUsers:
-        challenge = ModelImporter.model('challenge', 'covalic').load(
-            phase['challengeId'], force=True)
-        emails.extend(getChallengeUserEmails(challenge, accessLevel))
-        emails = list(set(emails))
-
-    return emails
+# def getPhaseUserEmails(phase, accessLevel, includeChallengeUsers=True):
+#     """
+#     Get a list of the email addresses for users with the given access level or
+#     above on the given phase.
+#
+#     :param phase: the phase document
+#     :type phase: dict
+#     :param accessLevel: the minimum access level
+#     :type accessLevel: girder.AccessType
+#     :param includeChallengeUsers: if True, include the email addresses for
+#         users with on the phase's challenge. Duplicates are removed.
+#     :type includeChallengeUsers: bool
+#     """
+#     acl = ModelImporter.model('phase', 'covalic').getFullAccessList(phase)
+#     users = _getUsers(acl, accessLevel)
+#     emails = [user['email'] for user in users]
+#
+#     if includeChallengeUsers:
+#         challenge = ModelImporter.model('challenge', 'covalic').load(
+#             phase['challengeId'], force=True)
+#         emails.extend(getChallengeUserEmails(challenge, accessLevel))
+#         emails = list(set(emails))
+#
+#     return emails
