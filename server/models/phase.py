@@ -24,7 +24,6 @@ import six
 from bson.objectid import ObjectId
 from girder.constants import AccessType
 from girder.models.model_base import AccessControlledModel, ValidationException
-from girder.utility.progress import noProgress
 from girder.plugins.covalic.utility import validateDate
 
 
@@ -45,17 +44,7 @@ class Phase(AccessControlledModel):
             'meta'})
         self.exposeFields(level=AccessType.ADMIN, fields={'scoreTask'})
 
-    def list(self, challenge, user=None, limit=50, offset=0, sort=None):
-        """
-        List phases for a challenge.
-        """
-        cursor = self.find(
-            {'challengeId': challenge['_id']}, limit=0, sort=sort)
 
-        for r in self.filterResultsByPermission(cursor=cursor, user=user,
-                                                level=AccessType.READ,
-                                                limit=limit, offset=offset):
-            yield r
 
     def validate(self, doc):
         if not doc.get('name'):
@@ -92,26 +81,7 @@ class Phase(AccessControlledModel):
 
         return doc
 
-    def subtreeCount(self, phase):
-        """
-        Returns the subtree count of this phase, which is the number of
-        submissions, plus one record for the phase itself.
-        """
-        return self.model(
-            'submission', 'covalic').getAllSubmissions(phase).count() + 1
 
-    def remove(self, phase, progress=noProgress):
-        """
-        Remove this phase, which also removes all submissions to it.
-        """
-        subModel = self.model('submission', 'covalic')
-        for sub in subModel.getAllSubmissions(phase):
-            subModel.remove(sub)
-            progress.update(increment=1,
-                            message='Deleted submission %s' % sub['title'])
-
-        super(Phase, self).remove(phase, progress=progress)
-        progress.update(increment=1, message='Deleted phase %s' % phase['name'])
 
     def createPhase(self, name, challenge, creator, ordinal, description='',
                     instructions='', active=False, public=True,
@@ -245,17 +215,4 @@ class Phase(AccessControlledModel):
         self.model('folder').setGroupAccess(testDataFolder, participantGroup,
                                             level=AccessType.READ, save=True)
 
-        return self.save(phase)
-
-    def updatePhase(self, phase):
-        """
-        Updates a phase.
-
-        :param phase: The phase document to update
-        :type phase: dict
-        :returns: The phase document that was edited.
-        """
-        phase['updated'] = datetime.datetime.utcnow()
-
-        # Validate and save the phase
         return self.save(phase)

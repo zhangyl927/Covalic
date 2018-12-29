@@ -25,7 +25,6 @@ from girder.models.model_base import Model, ValidationException
 from girder.plugins.covalic.utility import validateDate
 from girder.plugins.covalic import scoring
 from girder.plugins.worker import utils
-from girder.utility.progress import noProgress
 
 from ..constants import PluginSettings
 
@@ -50,21 +49,6 @@ class Submission(Model):
             'documentationUrl', 'approach', 'meta'
         ))
 
-    def load(self, *args, **kwargs):
-        doc = super(Submission, self).load(*args, **kwargs)
-        fields = kwargs.get('fields')
-        if (fields is None or 'approach' in fields) and \
-                doc is not None and doc.get('approach') is None:
-            doc['approach'] = 'default'
-        if doc is not None:
-            doc.setdefault('meta', {})
-        return doc
-
-    def save(self, document, *args, **kwargs):
-        document = super(Submission, self).save(document, *args, **kwargs)
-        document.setdefault('approach', 'default')
-        document.setdefault('meta', {})
-        return document
 
     def validate(self, doc):
         if doc.get('created'):
@@ -91,75 +75,6 @@ class Submission(Model):
 
         return doc
 
-    def getAllSubmissions(self, phase, filter=None):
-        """
-        Return a cursor of all submissions to a given phase.
-
-        :param phase: The phase.
-        :param filter: Any additional filtering rules for the result set.
-        :type filter: dict
-        """
-        if filter is None:
-            filter = {}
-        filter['phaseId'] = phase['_id']
-
-        return self.find(filter, limit=0)
-
-    def recomputeOverallScores(self, phase):
-        """
-        Recompute all of the overall score values for the submissions of a
-        given phase. This might be fairly expensive, so it should only be done
-        if the metric identifiers or weighting values actually change.
-
-        :param phase: The phase to recompute all submissions on.
-        """
-        for submission in self.getAllSubmissions(phase):
-            if submission.get('score'):
-                submission['overallScore'] = scoring.computeOverallScore(
-                    submission, phase)
-                self.save(submission, validate=False)
-
-    def remove(self, doc, progress=noProgress):
-        folder = self.model('folder').load(doc['folderId'], force=True)
-        if folder:
-            self.model('folder').remove(folder)
-
-        Model.remove(self, doc, progress=progress)
-
-    def list(self, phase, limit=50, offset=0, sort=None, userFilter=None,
-             fields=None, latest=True, approach=None):
-        q = {'phaseId': phase['_id']}
-
-        if userFilter is not None:
-            q['creatorId'] = userFilter['_id']
-        elif latest:
-            q['latest'] = True
-
-        if approach is not None:
-            q['approach'] = approach
-            if approach in {'default', ''}:
-                q['approach'] = None
-
-        cursor = self.find(q, limit=limit, offset=offset, sort=sort,
-                           fields=fields)
-        for result in cursor:
-            result.setdefault('approach', 'default')
-            yield result
-
-    def listApproaches(self, phase=None, user=None):
-        q = {}
-        if phase is not None:
-            q['phaseId'] = phase['_id']
-
-        if user is not None:
-            q['creatorId'] = user['_id']
-
-        approaches = [
-            approach for approach in self.collection.distinct('approach', filter=q)
-            if approach is not None
-        ]
-        approaches.append('default')
-        return sorted(set(approaches))
 
     def createSubmission(self, creator, phase, folder, job=None, title=None,
                          created=None, organization=None, organizationUrl=None,

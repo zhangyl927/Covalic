@@ -17,15 +17,7 @@
 #  limitations under the License.
 ###############################################################################
 
-import mako
-import os
-
-
-from girder import events
-from girder.api.rest import getCurrentUser
 from girder.api.v1 import resource
-from girder.constants import AccessType, SettingKey, STATIC_ROOT_DIR
-from girder.models.model_base import ValidationException
 
 
 from girder.utility.model_importer import ModelImporter
@@ -33,7 +25,6 @@ from girder.utility.plugin_utilities import registerPluginWebroot
 from .rest import challenge, phase, submission
 from .constants import PluginSettings, JOB_LOG_PREFIX
 from .utility import getAssetsFolder
-
 
 
 class CustomAppRoot(ModelImporter):
@@ -51,83 +42,6 @@ class CustomAppRoot(ModelImporter):
     }
 
 
-
-
-    def GET(self):
-        if self.indexHtml is None:
-            self.vars['pluginCss'] = []
-            self.vars['pluginJs'] = []
-
-            builtDir = os.path.join(
-                STATIC_ROOT_DIR, 'clients', 'web', 'static', 'built', 'plugins')
-            plugins = self.model('setting').get(SettingKey.PLUGINS_ENABLED, ())
-
-            for plugin in plugins:
-                if os.path.exists(os.path.join(builtDir, plugin,
-                                               'plugin.min.css')):
-                    self.vars['pluginCss'].append(plugin)
-                if os.path.exists(os.path.join(builtDir, plugin,
-                                               'plugin.min.js')):
-                    self.vars['pluginJs'].append(plugin)
-            self.indexHtml = mako.template.Template(self.template).render(
-                **self.vars)
-
-        return self.indexHtml
-
-
-def validateSettings(event):
-    if event.info['key'] == PluginSettings.SCORING_USER_ID:
-        if not event.info['value']:
-            raise ValidationException(
-                'Scoring user ID must not be empty.', 'value')
-        ModelImporter.model('user').load(
-            event.info['value'], force=True, exc=True)
-        event.preventDefault().stopPropagation()
-
-
-def challengeSaved(event):
-    """
-    After a challenge is saved, we want to update the Assets folder permissions
-    to be the same as the challenge.
-    """
-    challenge = event.info
-    folder = getAssetsFolder(challenge, getCurrentUser(), False)
-    ModelImporter.model('folder').copyAccessPolicies(
-        challenge, folder, save=True)
-
-
-def onPhaseSave(event):
-    """
-    Hook into phase save event to synchronize access control between the phase
-    and submission folders for the phase.
-    """
-    phase = event.info
-    submissionModel = ModelImporter.model('submission', 'covalic')
-    submissions = submissionModel.getAllSubmissions(phase)
-    submissionModel.updateFolderAccess(phase, submissions)
-
-
-
-
-def onUserSave(event):
-    """
-    Hook into user save event and update the user's name in their submissions.
-    """
-    user = event.info
-    subModel = ModelImporter.model('submission', 'covalic')
-    userName = subModel.getUserName(user)
-
-    query = {
-        'creatorId': user['_id']
-    }
-    update = {
-        '$set': {
-            'creatorName': userName
-        }
-    }
-    subModel.update(query, update)
-
-
 def load(info):
     resource.allowedSearchTypes.add('challenge.covalic')
 
@@ -137,9 +51,3 @@ def load(info):
 
     registerPluginWebroot(CustomAppRoot(), info['name'])
 
-    events.bind('model.setting.validate', 'covalic', validateSettings)
-    events.bind('model.challenge_challenge.save.after', 'covalic',
-                challengeSaved)
-    events.bind('model.challenge_phase.save.after', 'covalic',
-                onPhaseSave)
-    events.bind('model.user.save.after', 'covalic', onUserSave)
