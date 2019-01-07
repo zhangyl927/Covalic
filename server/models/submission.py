@@ -45,8 +45,7 @@ class Submission(Model):
                             'overallScore', 'approach'))
         self.exposeFields(level=AccessType.READ, fields=(
             '_id', 'creatorId', 'creatorName', 'phaseId', 'folderId', 'created',
-            'score', 'title', 'latest', 'overallScore', 'jobId', 'organization', 'organizationUrl',
-            'documentationUrl', 'approach', 'meta'
+            'score', 'title', 'latest', 'overallScore', 'jobId','approach', 'meta'
         ))
 
 
@@ -77,8 +76,7 @@ class Submission(Model):
 
 
     def createSubmission(self, creator, phase, folder, job=None, title=None,
-                         created=None, organization=None, organizationUrl=None,
-                         documentationUrl=None, approach=None, meta=None):
+                         created=None, meta=None):
         submission = {
             'creatorId': creator['_id'],
             'creatorName': self.getUserName(creator),
@@ -90,14 +88,6 @@ class Submission(Model):
             'meta': meta or {}
         }
 
-        if organization is not None:
-            submission['organization'] = organization
-        if organizationUrl is not None:
-            submission['organizationUrl'] = organizationUrl
-        if documentationUrl is not None:
-            submission['documentationUrl'] = documentationUrl
-        if approach is not None:
-            submission['approach'] = approach
 
         if job is not None:
             submission['jobId'] = job['_id']

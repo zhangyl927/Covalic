@@ -79,16 +79,16 @@ class Submission(Resource):
         .param('date', 'The date of the submission.', required=False)
         .param('userId', 'The ID of the user to submit on behalf of.',
                required=False)
-        .param('organization', 'Organization associated with the submission.', required=False)
-        .param('organizationUrl', 'URL for organization associated with the submission.',
-               required=False)
-        .param('documentationUrl', 'URL of documentation associated with the submission.',
-               required=False)
-        .param('approach', 'The submission approach.', required=False)
-        .jsonParam('meta', 'A JSON object containing additional submission metadata.',
-                   paramType='form', requireObject=True, required=False)
-        .errorResponse('You are not a member of the participant group.', 403)
-        .errorResponse('The ID was invalid.')
+        #.param('organization', 'Organization associated with the submission.', required=False)
+        #.param('organizationUrl', 'URL for organization associated with the submission.',
+         #      required=False)
+        #.param('documentationUrl', 'URL of documentation associated with the submission.',
+         #      required=False)
+        #.param('approach', 'The submission approach.', required=False)
+        #.jsonParam('meta', 'A JSON object containing additional submission metadata.',
+         #          paramType='form', requireObject=True, required=False)
+        #.errorResponse('You are not a member of the participant group.', 403)
+        #.errorResponse('The ID was invalid.')
     )
     def postSubmission(self, phase, folder, **params):
         user = self.getCurrentUser()
@@ -105,21 +105,8 @@ class Submission(Resource):
             self.model('phase', 'covalic').requireAccess(
                 phase, user, level=AccessType.WRITE)
 
-        # Require optional fields that are enabled in phase
-        organization = None
-        organizationUrl = None
-        documentationUrl = None
-        if phase.get('enableOrganization', False):
-            self._checkRequireParam(phase, params, 'organization', 'requireOrganization')
-            organization = self._getStrippedParam(params, 'organization')
-        if phase.get('enableOrganizationUrl', False):
-            self._checkRequireParam(phase, params, 'organizationUrl', 'requireOrganizationUrl')
-            organizationUrl = self._getStrippedParam(params, 'organizationUrl')
-        if phase.get('enableDocumentationUrl', False):
-            self._checkRequireParam(phase, params, 'documentationUrl', 'requireDocumentationUrl')
-            documentationUrl = self._getStrippedParam(params, 'documentationUrl')
 
-        approach = self._getStrippedParam(params, 'approach')
+        #approach = self._getStrippedParam(params, 'approach')
 
         # Site admins may override the submission creation date
         created = None
@@ -144,10 +131,7 @@ class Submission(Resource):
             job=None,
             title=title,
             created=created,
-            organization=organization,
-            organizationUrl=organizationUrl,
-            documentationUrl=documentationUrl,
-            approach=approach,
+            #approach=approach,
             meta=params.get('meta'))
 
         apiUrl = os.path.dirname(cherrypy.url())
