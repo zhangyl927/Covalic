@@ -184,11 +184,113 @@ class Submission(Resource):
         .errorResponse('Admin access was denied for the challenge phase.', 403)
     )
     def postScore(self, submission, score, params):
+        # Ensure admin access on the containing challenge phase
+        phase = self.model('phase', 'covalic').load(
+            submission['phaseId'], user=self.getCurrentUser(), exc=True,
+            level=AccessType.ADMIN)
+
+        # Record whether submission is being re-scored
+        rescoring = 'overallScore' in submission
 
         # Save document to trigger computing overall score
         submission.pop('overallScore', None)
         submission['score'] = score
         submission = self.model('submission', 'covalic').save(submission)
+
+        #########################################################  step1
+
+
+        ############################################
+        ######### 第一次嘗試
+        from girder.models.upload import Upload
+        from girder.api.v1.file import File
+        from girder.utility import RequestBodyStream
+        import six
+
+
+        dest = dict(submission)
+        # for i in range(5000):
+        #     dest.setdefault(i, i + 20)
+
+        dest1 = str(dest)
+        size = len(dest1)
+
+        user = self.model('user').load(submission['creatorId'], force=True)
+        #str1 = submission['title']
+        # str2 = '.txt'
+        # name = "".join((str1, str2))
+        name = submission['title']
+
+        parentType = 'folder'
+        parentId = submission['folderId']
+        parent = self.model(parentType).load(
+            id=parentId, user=user, level=AccessType.ADMIN, exc=True)
+
+        mimeType = u'image/png'
+        reference = None
+
+        File().requireParams({'size': size})
+        assetstore = None
+
+        chunk = None
+        if size > 0 and cherrypy.request.headers.get('Content-Length'):
+            ct = cherrypy.request.body.content_type.value
+            #if (ct not in cherrypy.request.body.processors and
+             #       ct.split('/', 1)[0] not in cherrypy.request.body.processors):
+              #  chunk = RequestBodyStream(cherrypy.request.body)
+        if chunk is not None and chunk.getSize() <= 0:
+            chunk = None
+
+        try:
+            # TODO: This can be made more efficient by adding
+            #    save=chunk is None
+            # to the createUpload call parameters.  However, since this is
+            # a breaking change, that should be deferred until a major
+            # version upgrade.
+            upload = Upload().createUpload(
+                user=user, name=name, parentType=parentType, parent=parent, size=size,
+                mimeType=mimeType, reference=reference, assetstore=assetstore)
+        except OSError as exc:
+            if exc.errno == errno.EACCES:
+                raise GirderException(
+                    'Failed to create upload.', 'girder.api.v1.file.create-upload-failed')
+            raise
+        if upload['size'] > 0:
+            if chunk:
+                return Upload().handleChunk(upload, chunk, filter=True, user=user)
+
+        else:
+            return self._model.filter(Upload().finalizeUpload(upload), user)
+
+        offset = 0
+
+        if 'chunk' in params:
+            chunk = params['chunk']
+            if isinstance(chunk, cherrypy._cpreqbody.Part):
+                # Seek is the only obvious way to get the length of the part
+                chunk.file.seek(0, os.SEEK_END)
+                size = chunk.file.tell()
+                chunk.file.seek(0, os.SEEK_SET)
+                chunk = RequestBodyStream(chunk.file, size=size)
+        else:
+            chunk = RequestBodyStream(six.BytesIO(dest1), len(dest1))
+            #chunk = FileHandle(dest1)
+
+        if upload['userId'] != user['_id']:
+            raise AccessException('You did not initiate this upload.')
+
+        if upload['received'] != offset:
+            raise RestException(
+                'Server has received %s bytes, but client sent offset %s.' % (
+                    upload['received'], offset))
+        try:
+            Upload().handleChunk(upload, chunk, filter=True, user=user)
+        except IOError as exc:
+            if exc.errno == errno.EACCES:
+                raise Exception('Failed to store upload.')
+            raise
+
+        ##########################################################################
 
         # Delete the scoring user's job token since the job is now complete.
         token = self.getCurrentToken()

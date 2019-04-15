@@ -193,7 +193,7 @@ class Submission(Model):
 
         task = phase.get('scoreTask', {})
         #image = task.get('dockerImage') or 'girder/covalic-metrics:latest'
-        image = task.get('dockerImage') or 'zhangyuli927/score_test'
+        image = task.get('dockerImage') or 'zhangyuli927/get_w_h'
         containerArgs = task.get('dockerArgs') or [
             '--groundtruth=$input{groundtruth}',
             '--submission=$input{submission}'
